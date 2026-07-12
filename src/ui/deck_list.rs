@@ -3,27 +3,35 @@
 use egui::{Align2, Color32, ProgressBar, RichText, Ui, Window};
 
 use crate::deck::Deck;
+use crate::lang::{Lang, T};
 
-/// Show the deck list window.
-/// Returns Some(deck_index) when user clicks to open a deck.
-/// Returns None for create/rename/delete which are handled via mutable inputs.
 pub fn show_deck_list(
     ui: &mut Ui,
+    t: &T,
     decks: &mut Vec<Deck>,
     next_id: &mut u64,
     show_create_dialog: &mut bool,
     new_deck_name: &mut String,
+    lang: &mut Lang,
 ) -> Option<usize> {
     let mut open_deck: Option<usize> = None;
 
-    ui.heading(RichText::new("Poker Collection").size(24.0).color(Color32::GOLD));
+    // Title row with language toggle
+    ui.horizontal(|ui| {
+        ui.heading(RichText::new(t.app_title()).size(24.0).color(Color32::GOLD));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.button(RichText::new(lang.label()).size(12.0)).clicked() {
+                *lang = lang.toggle();
+            }
+        });
+    });
 
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.heading("Your Decks");
+        ui.heading(t.your_decks());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("+ New Deck").clicked() {
+            if ui.button(t.new_deck()).clicked() {
                 *show_create_dialog = true;
                 *new_deck_name = String::new();
             }
@@ -35,7 +43,7 @@ pub fn show_deck_list(
     if decks.is_empty() {
         ui.vertical_centered(|ui| {
             ui.add_space(40.0);
-            ui.label(RichText::new("No decks yet. Click '+ New Deck' to start collecting!").size(16.0));
+            ui.label(RichText::new(t.no_decks()).size(16.0));
         });
     }
 
@@ -43,31 +51,31 @@ pub fn show_deck_list(
         let mut to_delete: Option<usize> = None;
 
         for (idx, deck) in decks.iter().enumerate() {
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    // Deck name button (click to open)
-                    if ui
-                        .add_sized(
-                            [200.0, 30.0],
-                            egui::Button::new(RichText::new(&deck.name).size(16.0)),
-                        )
-                        .clicked()
-                    {
-                        open_deck = Some(idx);
+            let collected = deck.collected_count();
+            let total = deck.total_cards();
+            let progress = collected as f32 / total as f32;
+
+            ui.horizontal(|ui| {
+                // Deck name button
+                if ui
+                    .add_sized(
+                        [180.0, 30.0],
+                        egui::Button::new(RichText::new(&deck.name).size(16.0)),
+                    )
+                    .clicked()
+                {
+                    open_deck = Some(idx);
+                }
+
+                // Progress
+                ui.label(format!("{}/{} ({:.0}%)", collected, total, progress * 100.0));
+                ui.add(ProgressBar::new(progress).desired_width(100.0).show_percentage());
+
+                // Push delete button to right
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(t.delete()).clicked() {
+                        to_delete = Some(idx);
                     }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Delete").clicked() {
-                            to_delete = Some(idx);
-                        }
-                    });
-
-                    // Progress
-                    let collected = deck.collected_count();
-                    let total = deck.total_cards();
-                    let progress = collected as f32 / total as f32;
-                    ui.label(format!("{}/{} ({:.0}%)", collected, total, progress * 100.0));
-                    ui.add(ProgressBar::new(progress).desired_width(100.0).show_percentage());
                 });
             });
 
@@ -82,21 +90,21 @@ pub fn show_deck_list(
     // Create deck dialog
     if *show_create_dialog {
         let mut should_close = false;
-        Window::new("New Deck")
+        Window::new(t.new_deck_title())
             .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label("Deck name:");
+                ui.label(t.deck_name());
                 ui.text_edit_singleline(new_deck_name);
                 ui.horizontal(|ui| {
-                    if ui.button("Create").clicked() && !new_deck_name.trim().is_empty() {
+                    if ui.button(t.create()).clicked() && !new_deck_name.trim().is_empty() {
                         let id = *next_id;
                         *next_id += 1;
                         decks.push(Deck::new(id, new_deck_name.trim()));
                         should_close = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(t.cancel()).clicked() {
                         should_close = true;
                     }
                 });

@@ -130,6 +130,18 @@ impl Deck {
         }
     }
 
+    pub fn collect_all(&mut self) {
+        for c in self.cards.iter_mut() {
+            c.collected = true;
+        }
+    }
+
+    pub fn uncollect_all(&mut self) {
+        for c in self.cards.iter_mut() {
+            c.collected = false;
+        }
+    }
+
     pub fn is_all_collected(&self) -> bool {
         self.collected_count() == TOTAL_CARDS
     }

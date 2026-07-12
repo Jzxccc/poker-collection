@@ -5,6 +5,7 @@
 use egui::{Align2, Color32, Painter, Pos2, ProgressBar, Rect, RichText, Ui, Vec2};
 use crate::deck::{Card, Deck, Rank, Suit, make_reference_cards, TOTAL_CARDS};
 use crate::effects::{draw_glow_border, ParticleSystem};
+use crate::lang::T;
 
 const CARD_SIZE: f32 = 72.0;
 const CARD_GAP: f32 = 8.0;
@@ -24,12 +25,15 @@ pub enum FilterMode {
 }
 
 impl FilterMode {
-    fn label(&self) -> &'static str {
+    fn label(&self, t: &T) -> String {
         match self {
-            FilterMode::All => "All", FilterMode::Collected => "Collected",
-            FilterMode::Uncollected => "Uncollected",
-            FilterMode::Suit(Suit::Spades) => "♠", FilterMode::Suit(Suit::Hearts) => "♥",
-            FilterMode::Suit(Suit::Diamonds) => "♦", FilterMode::Suit(Suit::Clubs) => "♣",
+            FilterMode::All => t.all().into(),
+            FilterMode::Collected => t.collected().into(),
+            FilterMode::Uncollected => t.uncollected().into(),
+            FilterMode::Suit(Suit::Spades) => "♠".into(),
+            FilterMode::Suit(Suit::Hearts) => "♥".into(),
+            FilterMode::Suit(Suit::Diamonds) => "♦".into(),
+            FilterMode::Suit(Suit::Clubs) => "♣".into(),
             _ => unreachable!(),
         }
     }
@@ -76,7 +80,8 @@ fn packed_pos(idx: usize) -> (usize, usize) { (idx % COLS, idx / COLS) }
 fn original_pos(idx: usize) -> (usize, usize) { (idx / 13, idx % 13) }
 
 pub fn show_card_grid(
-    ui: &mut Ui, deck: &mut Deck, particle_system: &mut ParticleSystem,
+    ui: &mut Ui, t: &T,
+    deck: &mut Deck, particle_system: &mut ParticleSystem,
     filter: &mut FilterMode, rank_filter: &mut String, scroll: &mut f32,
     complete_deck: &mut Option<String>, pinned: &mut Vec<usize>,
 ) -> bool {
@@ -85,20 +90,24 @@ pub fn show_card_grid(
 
     // Header
     ui.horizontal(|ui| {
-        if ui.button("Back").clicked() { go_back = true; }
+        if ui.button(t.back()).clicked() { go_back = true; }
         ui.heading(RichText::new(&deck.name).size(22.0).color(Color32::GOLD));
     });
     let c = deck.collected_count();
     let pct = c as f32 / TOTAL_CARDS as f32;
     ui.horizontal(|ui| {
-        ui.label(format!("Progress: {}/{} ({:.0}%)", c, TOTAL_CARDS, pct * 100.0));
+        ui.label(format!("{}: {}/{} ({:.0}%)", t.progress(), c, TOTAL_CARDS, pct * 100.0));
         ui.add(ProgressBar::new(pct).desired_width(200.0).animate(true));
+    });
+    ui.horizontal(|ui| {
+        if ui.button(t.select_all()).clicked() { deck.collect_all(); }
+        if ui.button(t.deselect_all()).clicked() { deck.uncollect_all(); }
     });
 
     // Filter
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label("Filter: ");
+        ui.label(t.filter());
         for &f in &[
             FilterMode::All, FilterMode::Collected, FilterMode::Uncollected,
             FilterMode::Suit(Suit::Spades), FilterMode::Suit(Suit::Hearts),
@@ -106,18 +115,18 @@ pub fn show_card_grid(
         ] {
             let sel = *filter == f;
             let b = if sel {
-                egui::Button::new(RichText::new(f.label()).size(14.0).color(Color32::WHITE))
+                egui::Button::new(RichText::new(f.label(t)).size(14.0).color(Color32::WHITE))
                     .fill(Color32::from_rgb(70, 70, 70))
-            } else { egui::Button::new(RichText::new(f.label()).size(14.0)) };
+            } else { egui::Button::new(RichText::new(f.label(t)).size(14.0)) };
             if ui.add_sized([50.0, 24.0], b).clicked() { *filter = f; pinned.clear(); }
         }
         ui.separator();
-        ui.label("Rank:");
+        ui.label(t.rank());
         ui.add_sized([40.0, 20.0], egui::TextEdit::singleline(rank_filter).hint_text("A-K"));
     });
     let visible = visible_indices(deck, &reference, *filter, rank_filter, pinned);
     if *filter != FilterMode::All || !rank_filter.trim().is_empty() {
-        ui.label(RichText::new(format!("Showing {}/52", visible.len())).size(12.0).color(Color32::GRAY));
+        ui.label(RichText::new(t.showing(visible.len())).size(12.0).color(Color32::GRAY));
     }
     ui.separator();
 
@@ -129,7 +138,6 @@ pub fn show_card_grid(
     let content_h = (if use_orig { 13.0 } else { ((visible.len() + COLS - 1) / COLS).max(1) as f32 })
         * (CARD_SIZE + CARD_GAP) + CARD_GAP;
 
-    // allocate body space
     let (body, _) = ui.allocate_exact_size(
         Vec2::new(grid_w + 8.0 + joker_w, body_h),
         egui::Sense::hover(),
@@ -137,7 +145,6 @@ pub fn show_card_grid(
     let grid_rect = Rect::from_min_size(body.min, Vec2::new(grid_w, body_h));
     let joker_rect = Rect::from_min_size(Pos2::new(body.min.x + grid_w + 8.0, body.min.y), Vec2::new(joker_w, body_h));
 
-    // Scroll: use egui scroll_delta (raw, immediate)
     let view_h = body_h - CARD_GAP * 2.0;
     let max_s = (content_h - view_h).max(0.0);
     let ctx = ui.ctx();
@@ -146,29 +153,33 @@ pub fn show_card_grid(
     }
     *scroll = scroll.clamp(0.0, max_s);
 
-    // Track if deck was complete before clicks
     let was_all = deck.is_all_collected();
 
-    // Grid: clip to grid_rect, translate by scroll
     let grid_pad = grid_rect.shrink(CARD_GAP);
     let grid_painter = ui.painter().with_clip_rect(grid_rect);
     let shifted = grid_pad.translate(Vec2::new(0.0, -*scroll));
     paint_grid(&grid_painter, deck, &reference, shifted, &visible, use_orig);
     handle_clicks(ui, deck, shifted, &visible, use_orig, pinned);
 
-    // Jokers — follow the filter
+    // Jokers — label painted directly, no ui.put to avoid borrow conflict
     let jp = ui.painter();
     let jx = joker_rect.min.x + CARD_GAP;
-    let jy0 = joker_rect.min.y + 8.0;
+    let jy0 = joker_rect.min.y + 2.0;
+    jp.text(
+        Pos2::new(jx + JOKER_W / 2.0, jy0),
+        Align2::CENTER_TOP,
+        t.jokers(),
+        egui::FontId::proportional(14.0),
+        Color32::from_gray(180),
+    );
     for (ji, &idx) in [52usize, 53].iter().enumerate() {
-        // Skip joker if filtered out
         let collected = deck.cards[idx].collected;
         match *filter {
             FilterMode::Collected if !collected => continue,
             FilterMode::Uncollected if collected => continue,
             _ => {}
         }
-        let y = jy0 + ji as f32 * (JOKER_H + CARD_GAP);
+        let y = jy0 + 20.0 + ji as f32 * (JOKER_H + CARD_GAP);
         let cr = Rect::from_min_size(Pos2::new(jx, y), Vec2::new(JOKER_W, JOKER_H));
         paint_card(&jp, cr, &reference[idx], collected);
         if ctx.input(|i| i.pointer.primary_clicked()) {
@@ -181,13 +192,11 @@ pub fn show_card_grid(
         }
     }
 
-    // Check if deck just became fully collected
     if !was_all && deck.is_all_collected() {
         *complete_deck = Some(deck.name.clone());
         particle_system.celebrate(Vec2::new(grid_rect.center().x, grid_rect.center().y));
     }
 
-    // Particles (clipped to full area, no scroll)
     for p in &particle_system.particles {
         let a = (p.lifetime / p.max_lifetime).min(1.0);
         ui.painter().circle_filled(
@@ -252,6 +261,6 @@ fn paint_card(painter: &Painter, rect: Rect, card: &Card, collected: bool) {
     let short = match card.rank {
         Rank::RedJoker => "★ Red".into(), Rank::BlackJoker => "☆ Black".into(), _ => card.display(),
     };
-    let fs = if rect.width() > 90.0 { 16.0 } else { 13.0 };
+    let fs = if rect.width() > 90.0 { 22.0 } else { 18.0 };
     painter.text(rect.center(), Align2::CENTER_CENTER, short, egui::FontId::proportional(fs), tc);
 }

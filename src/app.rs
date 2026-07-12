@@ -5,6 +5,7 @@ use eframe::egui;
 use egui::CentralPanel;
 use crate::deck::Deck;
 use crate::effects::ParticleSystem;
+use crate::lang::{Lang, T};
 use crate::storage;
 use crate::ui::{deck_list, card_grid};
 use crate::ui::card_grid::FilterMode;
@@ -20,6 +21,7 @@ pub struct App {
     next_id: u64,
     panel: Panel,
     particle_system: ParticleSystem,
+    lang: Lang,
     // Deck list state
     show_create_dialog: bool,
     new_deck_name: String,
@@ -42,6 +44,7 @@ impl App {
             next_id,
             panel: Panel::DeckList,
             particle_system: ParticleSystem::new(),
+            lang: Lang::Zh,
             show_create_dialog: false,
             new_deck_name: String::new(),
             card_filter: FilterMode::All,
@@ -57,25 +60,24 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
-
-        // Update particle system
         self.particle_system.update(dt);
-
-        // Request repaint while particles are active
         if self.particle_system.active {
             ctx.request_repaint();
         }
+
+        let t = T::new(self.lang);
 
         CentralPanel::default().show(ctx, |ui| {
             match self.panel {
                 Panel::DeckList => {
                     let prev_len = self.decks.len();
                     if let Some(deck_index) = deck_list::show_deck_list(
-                        ui,
+                        ui, &t,
                         &mut self.decks,
                         &mut self.next_id,
                         &mut self.show_create_dialog,
                         &mut self.new_deck_name,
+                        &mut self.lang,
                     ) {
                         self.card_filter = FilterMode::All;
                         self.rank_filter = String::new();
@@ -90,7 +92,7 @@ impl eframe::App for App {
                 Panel::CardGrid { deck_index } => {
                     let prev_count = self.decks[deck_index].collected_count();
                     let go_back = card_grid::show_card_grid(
-                        ui,
+                        ui, &t,
                         &mut self.decks[deck_index],
                         &mut self.particle_system,
                         &mut self.card_filter,
@@ -109,24 +111,25 @@ impl eframe::App for App {
             }
         });
 
-        // Show completion popup
+        // Completion popup
         if let Some(ref name) = self.complete_deck.clone() {
-            egui::Window::new("Collection Complete!")
+            egui::Window::new(t.collection_complete())
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading(egui::RichText::new("Congratulations!").size(24.0));
+                        ui.heading(egui::RichText::new(t.congratulations()).size(24.0));
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new(format!("\"{}\" is fully collected!", name)).size(16.0));
+                        ui.label(egui::RichText::new(t.fully_collected(name)).size(16.0));
                         ui.add_space(12.0);
-                        if ui.button("OK").clicked() {
+                        if ui.button(t.ok()).clicked() {
                             self.complete_deck = None;
                         }
                     });
                 });
         }
+
         if self.needs_save {
             storage::save_decks(&self.decks);
             self.needs_save = false;
